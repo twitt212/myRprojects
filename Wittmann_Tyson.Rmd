@@ -1,0 +1,396 @@
+---
+title: "Final Project: Do States Which have Removed Mask Mandates Have More Deaths than Those Which Have Kept Them?"
+author: "Tyson Wittmann"
+date: "As of 4/20/2021"
+output:
+  pdf_document: default
+  html_document: default
+---
+When determining whether or not lifting mask mandates causes the pandemic to worsen, the main metric used to measure success or fail or mask mandates on public health and mitigating the threat of COVID-19 will be deaths. It was decided to use deaths instead of overall case numbers because the total number of cases is subject to how much testing occurs. For example, New York had many Coronavirus deaths early on in the pandemic when there was not much testing capacity, whereas Florida had lower deaths numbers per capita than New York during its peak but had much higher case totals because of increased testing capacity. In order to eliminate the testing variation over time factor from the final results, deaths was chose. While this variable has its own particular issues, it does not cause problems to the same extent as total cases. Some states never implemented mask mandates. This leads to complications with the data becasue there was originally no dateEnded variable in the dataset, but there needs to be one in order for the modelling and the analysis to be correct because roughly 30 percent of the states without mask mandates never implemented them in the first place. So, the values for the dateEnded variable for states which never implemented mask mandates was set to be April 8, 2020, since that is the day the first mask mandate was implemented. After the modeling is completed, the required p value for rejecting the null hypothesis will be less than .05. If the p value is above .05, then the null hypothesis cannot be rejected.
+
+The goal of the code below is to answer the question: "How do states without mask mandates compare to those with them?" 
+The data sets I will be using in this analysis are: dplyr for cleaning the date, modelr for modeling, tidyverse also for preparing the data, ggplot2 for presenting the data in comprehensive charts, lubrdidate for dealing with days, and zoo also for dealing with days and strings conversions.
+```{r}
+library(dplyr)
+library(modelr)
+library(tidyverse)
+library(ggplot2)
+library(lubridate)
+library("zoo")
+```
+
+There are three different excel files which I will use in this data analysis. The first is all-states-history.csv, which is primarily used for finding the total number of deaths on a given day. The pop data set is an excel file which is primarily used for the total US population in the death_rates calculations. Finally, the counties data set is primarily used to make the population data set usable to find the total US population for each state individually and then for the country as a whole. I chose to use deaths instead of overall case numbers because the total number of cases is subject to how much testing occurs. For example, New York had many Coronavirus deaths early on in the pandemic when there was not much testing capacity, whereas Florida had lower deaths numbers per capita than New York during its peak but had much higher case totals because of increased testing capacity. In order to eliminate the testing factor from the final results, I chose to use deaths, which has its own particular issues but not to the same extent as total cases. 
+```{r}
+initial.State.Data.Frame <- read_csv("covid_deaths_usafacts.csv")
+
+pop <- read_csv("covid_confirmed_usafacts.csv")
+
+counties <- read_csv("covid_county_population_usafacts.csv")
+
+mask_mandates <- read_csv("myMandates.csv")
+```
+
+The code below cleans the data from the CSV file and initially changes the date variable from a string to a date and time. Next, each of the NA values are replaced with the values to before since the data is based on an aggregate total rather than a day by day change. This means that if an increase is not recorded from the day before, and there is an NA value instead, the total should have a value of the observation from the day before rather than a value of zero or the NA value which would not show up in graphs. The data is then arranged for convenience and filtered for values greater than zero to restrict the data frame to the days where there were cases since the days without cases do not matter for this analysis. Finally, the variables which matter are selected.
+```{r}
+
+testing <- initial.State.Data.Frame %>%
+  filter(State == "AL") %>%
+  mutate(death_total = sum(`1/25/2021`))
+
+
+state.Data.Frame <- initial.State.Data.Frame %>%
+  rename(state = State) %>%
+  select(-countyFIPS, -StateFIPS, -`County Name`) %>%
+  pivot_longer(-state) %>%
+  mutate(date = mdy(name)) %>%
+  rename(death = value) %>%
+  distinct(death, date, state) %>%
+  group_by(state, date) %>%
+  mutate(death = sum(death)) %>%
+  distinct() %>%
+  filter(!(state == "MI"))
+
+View(state.Data.Frame)
+
+```
+
+
+In this case, it would be extremely poor practice to remove outliers from the data frame because that would pervert the data. The high number days with high number of cases are not wrong. Rather, they show that a large percentage of the cases come from a smaller number of days. 
+```{r}
+state.Data.Frame %>%
+  ggplot(aes(x = death)) +
+    geom_boxplot()
+```
+In the case of deaths as well, it would be extremely poor practice to remove outliers from the data frame because that would pervert the data. The high number days with high number of deaths are not wrong. Rather, they show that a large percentage of the deaths come from a small number of days, and most days did not have that many deaths, which is consistent with what I expected.
+
+The code below isolates the mask mandate removal days for each state and by converting the character into a date data type.
+```{r}
+dataframe.Mask <- mask_mandates %>%
+  rename(dateEnded = `Ended face mask mandate`) %>%
+  rename(state = `State Abbreviation`) %>%
+  mutate(dateEnded = mdy(dateEnded)) %>%
+  select(state, dateEnded)
+
+summary(dataframe.Mask)
+```
+The code below shows how the time at which the mask mandates were lifted differs over time and the summary of the data is shown directly beneath as well.
+```{r}
+dataframe.Mask %>%
+  filter(!(is.na(dateEnded))) %>%
+  ggplot(aes(x = dateEnded)) +
+    geom_boxplot(na.rm = TRUE)
+
+
+summary(dataframe.Mask)
+```
+
+
+
+
+
+
+
+
+The code below finds the total US population as well as the population of each individual state and then joins the two into a new dataframe which will eventually be joined to another one. 
+```{r}
+pop_data <- left_join(counties, pop)
+
+pop_final <- pop_data %>%
+  group_by(State) %>%
+  mutate(state_population = sum(population)) %>%
+  rename(state = State) %>%
+  select(state_population) %>%
+  distinct()
+
+
+us_population <- pop_data %>%
+  ungroup() %>%
+  summarise(state = State, total_population = sum(population)) %>%
+  distinct()
+
+
+population.Frame <- left_join(pop_final, us_population)
+population.Frame
+```
+
+The state_population variable has the following distribution:
+```{r}
+population.Frame %>%
+  ggplot(aes(x = state_population)) + 
+    geom_boxplot()
+```
+The chart above shows that the majority of states have between 2.5 and 7.5 million people with some outliers like California up near 40 million citizens.
+
+
+The code below is simply used to join the population variable into the data set created before with all of the relevant selected. The main focus of this code below should be on the mutation of an essential variable called death_rates, which I will use multiple times again. The purpose of this variable is to compare death rates by state with the difference in population  by state taken into account and most of its effect on the data negated through the creation of this variable. 
+```{r}
+full_data <- left_join(state.Data.Frame, population.Frame)
+full_data <- left_join(full_data, dataframe.Mask)
+
+death_data <- full_data %>%
+  arrange(state) %>%
+  mutate(death_rates = death / state_population)
+
+View(death_data)
+```
+The code below shows the distribution of death rates with the na values 
+```{r}
+death_data %>%
+  ggplot(aes(x = death_rates)) +
+    geom_boxplot()
+```
+The distribution of death rates looks identical to that of the death rate distribution, as it should since all of the observation values are divided by the population, keeping the distribution of the variable identical. Similar to how it would be a mistake to remove the outliers in with the death data, it would make no sense to remove the days with higher death rates since they are not flukes, rather a small number of days represent a large amount of the deaths, which is just an emergent phenomenon from the way the pandemic has spread over time. 
+
+
+The point of the graph below is to show the relationship between death_rates (cases per capita), dates, and states. Rather than being limited being limited to showing the distribution of one variable, the graph below shows a multivariate analysis which should help answer the question posed at the beginning regarding the relationships between states and overall death rates.
+```{r}
+death_data %>%
+  ggplot(aes(x= date, y = death_rates, color = state)) +
+    geom_point(alpha = .3, na.rm = TRUE) +
+    facet_wrap(~state)
+
+```
+
+
+This combination of graphs below shows the death rates for each individual state. As you can see, there is a very wide discrepancy in the number of deaths from the coronavirus by state. For example, New York and New Jersey had a large rise in death rate near the beginning, giving it one of the overall highest death rates of any state in the country. On the other hand, South Dakota had a peak much later on in the pandemic.
+```{r}
+death_data %>%
+  filter(!(is.na(dateEnded))) %>%
+  ggplot(aes(x= date, y = death_rates, color = state)) +
+    geom_point(alpha = .3) +
+    facet_wrap(~state)
+
+```
+The code below creates a new variable called death_tots, which finds the total number of deaths
+```{r}
+national_deaths <- death_data %>%
+  group_by(date) %>%
+  mutate(death_tots = sum(death)) %>%
+  ungroup() %>%
+  summarise(date, death_tots) %>% 
+  distinct(date, death_tots)
+
+```
+Since there is a new variable, the code below shows a boxplot of the distribution for how the death totals compare over time. This variable shows how the total number of deaths for the entire country changed over time.
+*Note that there shouldn't be any removal of outliers for the same reason that outliers were not removed from the death totals per state.*
+```{r}
+national_deaths %>%
+  ggplot(aes(x = death_tots)) + 
+    geom_boxplot()
+
+```
+The chart above shows that the majority of days had a total death toll of around 200 to 300k, with the more recent totals coming close to almost 500k.  
+
+
+The code below filters the dates which were buggy and more importantly creates a new variable for death rate from death_tots where the total US population is taken into account so that each state can eventually be compared to the average.
+```{r}
+natl_death <- left_join(death_data, national_deaths)
+
+death.Rate.Data.Frame <- natl_death %>%
+  mutate(death_raten = death_tots/328239523)
+
+View(death.Rate.Data.Frame)
+
+```
+
+The distribution of the variable above is mapped on the boxplot below, which is very similar to the most recent boxplot where each observation is being changed equally so that the shape of the distrubtion itself is unchanged. The only thing which is different is the values on the y-axis as those are all divided.
+```{r}
+death.Rate.Data.Frame %>%
+  ggplot(aes(x = death_raten)) +
+    geom_boxplot()
+```
+
+
+This plot the states without mask mandates to the mean at each day so that the effects of masks on the population can be compared. At first glance, there does not appear to be any significant difference apparent. However, the code below should give a more accurate sense of whether or not there is a statistically significant difference, or if no definitive statement about masking or unmasking can be made based off the data presented. Each vertical line indicates the day at which the mask mandate was lifted for that specific state. Note that if the state never had a mask mandate, then that is counted as removing a mask mandate the day the first mask mandate was introduced. This will be useful for ensuring the accuracy of the models later, but is a technicality at this point.  
+``` {r}
+testing <- death.Rate.Data.Frame %>%
+  filter(!(is.na(dateEnded))) %>%
+  ungroup() %>%
+  distinct(state, dateEnded) %>%
+  group_by(state, dateEnded)
+testing
+
+
+death.Rate.Data.Frame %>%
+  filter(!(is.na(dateEnded))) %>%
+  ggplot(aes(x = date, y = death_rates, color = state)) +
+    geom_point(stat = "identity", alpha = .2) +
+    ggtitle("                 Death Rates Over Time for Each State without \n                       Mask Mandates Compared to the Mean") +
+    scale_y_continuous("Death Rate") +
+    scale_x_date("Date") +
+    geom_point(y = death.Rate.Data.Frame$death_raten[0:10896], color = "Black") +
+    geom_vline(aes(xintercept = dateEnded)) +
+    facet_wrap(~state)
+
+
+```
+These graphs which are separated using facet_wrap function in the ggplot package start to give us a clear picture of the data to help us answer the question regarding the effectiveness of mask mandates. The black line represents the average death rate over time, the other color represents the specific state, and the vertical line represents the day the mask mandate was lifted for that specific state. If a mask mandate was never implemented, the mask removal date is counted as April 8, 2020 since that is when the first mask mandate was created. For example, it may initially look like Arizona suffered many deaths as a result of lifting its mask mandate on the graph above because it had a sharp increase in cases later on in the pandemic. However, the state actually lifted its mask mandate well after the rise in death numbers, so that specifc cause in the rise in deaths can be ruled out for that state. Additionally, many news outlets were reporting the deaths in South Datkota as being high. However, looking at the state compared to the national average, there does not seem to be any sort of major discrepancy. Finally, Florida was the major focus of the pandemic’s rise for a while because of the lower restrictions on public activity during the pandemic. Despite recording high numbers of cases, Florida’s death numbers matched the national average almost perfectly, suggesting a large amount of testing. As a side note, Florida has one of the oldest populations in the country, so their death totals are suprising.
+
+
+
+The following code isolates all of the states without mask mandates from the following sources and creates some new variables for just these states.  
+Source : https://www.cnn.com/2020/11/09/us/biden-mask-mandate-nationwide-trnd/index.html
+```{r}
+unmasked_population <- death.Rate.Data.Frame %>%
+  filter(!(is.na(dateEnded))) %>%
+  distinct(state, state_population) %>%
+  filter(!is.na(state_population)) %>%
+  group_by(state, state_population)
+
+test <- unmasked_population %>%
+  distinct(state_population) %>%
+  ungroup() %>%
+  mutate(unmasked_population = sum(state_population))
+test
+
+
+
+unmasked_deathrates <- death.Rate.Data.Frame %>%
+  filter(!(is.na(dateEnded))) %>%
+  group_by(date) %>%
+  mutate(unmasked_death_tots = sum(death) / 132275165)  %>%
+  distinct(date, unmasked_death_tots)
+  
+
+masked_deathrates <- death.Rate.Data.Frame %>%
+  filter(is.na(dateEnded)) %>%
+  filter(!is.na(death)) %>%
+  group_by(date) %>%
+  mutate(masked_death_tots = sum(death)/(328239523 - 132275165)) %>%
+  distinct(date, masked_death_tots)
+```
+
+There are two boxplots below. The one on the left shows that the majority of days had death totals between 100,000 and 300,000 deaths in total with a couple near 500,000. The boxplot on the right shows a similar trend just each deaths divided by the total US population.
+```{r}
+unmasked_deathrates %>%
+  ggplot(aes(x = unmasked_death_tots)) +
+    geom_boxplot()
+
+masked_deathrates %>%
+  ggplot(aes(x = masked_death_tots)) +
+    geom_boxplot()
+```
+
+The code below joins the two datasets for unmasked and normal into one final version of the dataset which encompasses everything up until this point. Right below it is the code for a graph which should take the aggregate for each state without masks each day and compare that to the aggregate for the United States as a whole
+```{r}
+intermediate.one.Frame <- left_join(death.Rate.Data.Frame, unmasked_deathrates)
+
+intermediate.Two.Frame <- left_join(intermediate.one.Frame, masked_deathrates)
+
+```
+
+The code below finds the difference between the masked and unmasked death_rates and the average and adds the differences over time as two new variables.
+```{r}
+final.Frame <- intermediate.Two.Frame %>%
+  mutate(unmasked_risids = unmasked_death_tots - death_raten) %>%
+  mutate(masked_risids = masked_death_tots - death_raten)
+
+```
+
+
+The plots below shows the distribution of the residual variables. The boxplots appear to be flipped where masked tend to be higher than the average and unmasked tend to be lower than the average.
+```{r}
+final.Frame %>%
+  ggplot(aes(x = masked_risids)) +
+    geom_boxplot()
+
+final.Frame %>%
+  ggplot(aes(x = unmasked_risids)) +
+    geom_boxplot()
+```
+
+
+
+
+```{r}
+final.Frame %>%
+  ggplot(aes(x = date, y = masked_death_tots)) + 
+    geom_point(aes(color = "masked")) +
+    ggtitle("   Death Rates Over Time for Unmasked and Masked states") +
+    scale_y_continuous("Death Rate") +
+    scale_x_date("Date") +
+    geom_vline(xintercept = ymd("2021-01-18")) +
+    geom_vline(xintercept = ymd("2020-04-08")) +
+    geom_text(aes(x=ymd("2021-01-14"), label = "median"), y = .00015, size = 3, angle = 90, vjust = .4) +
+    geom_text(aes(x=ymd("2020-04-05"), label = "Q1"), y = .00015, size = 3, angle = 90, vjust = .4) +
+    geom_vline(xintercept = ymd("2021-03-30")) +
+    geom_text(aes(x=ymd("2021-03-27"), label = "Q3"), y = .00015, size = 3, angle = 90, vjust = .4) +
+    scale_x_date("Date") +
+    geom_text(aes(x=ymd("2020-10-25"), label = "Mask Removal Date Distribution"), y = .0001, size = 3, vjust = .4) +
+    geom_point(aes(y = unmasked_death_tots, color = "unmasked")) +
+    geom_point(aes(y = death_raten, color = "all"))
+```
+The chart above shows the overall trend of death rates for states without mask mandates versus those with them and the overall average. In the beginning of the pandemic, the states which ended up not having mask mandates had lower overall death rates than the average. However, as the pandemic went on, the unmasked states eventually had a slightly higher death rate than those with mask mandates. In order for there to be a statistically significant relationship between the death rates and removal of mask mandates, the blue line should be increasingly above the green and red ones as you move to the right on the graph. If the death rates for states without mask mandates were higher because the mandates were lifted, then the gap between the blue and red should have widened near the end rather than gotten closer, but that does not appear to happen. This relationship is explored even more in the graph below.
+```{r}
+cor.test(final.Frame$unmasked_death_tots, final.Frame$masked_death_tots)
+```
+The plot below shows how the residuals change over time
+```{r}
+final.Frame %>%
+  ggplot(aes(x = date, y = 0)) + 
+    geom_point(aes(color = "all")) +
+    ggtitle("Death Rates residuals Over Time for Unmasked and Masked states") +
+    scale_y_continuous("Death Rate Residual") +
+    geom_vline(xintercept = ymd("2021-01-18")) +
+    geom_vline(xintercept = ymd("2020-04-08")) +
+    geom_text(aes(x=ymd("2021-01-14"), label = "median"), y = -.00015, size = 3, angle = 90, vjust = .4) +
+    geom_text(aes(x=ymd("2020-04-02"), label = "Q1"), y = -.00015, size = 3, angle = 90, vjust = .4) +
+    geom_vline(xintercept = ymd("2021-03-30")) +
+    geom_text(aes(x=ymd("2021-03-27"), label = "Q3"), y = -.00015, size = 3, angle = 90, vjust = .4) +
+    scale_x_date("Date") +
+    geom_text(aes(x=ymd("2020-10-30"), label = "Mask Removal Date Distribution"), y = -.000185, size = 3, vjust = .4) +
+    geom_point(aes(y = unmasked_risids, color = "unmasked")) +
+    geom_point(aes(y = masked_risids, color = "masked"))
+```
+This chart examines the relationship between the date and the difference between the masked and unmasked y values on the graph before this one. In the beginning of the pandemic, the majority of states which did not end up implementing a mask mandate did not have nearly the same number of deaths as those which ended up implementing a mask mandate. This is likely due to the fact that the virus spreads faster in more densely populated areas, so it ran through major cities. So, states with higher initial death tolls tend to implement mask mandates because the areas are more densely populated, allowing the virus to spread more quickly, incentivizing people to care more about not spreading the virus. Around February, when the median state had removed its mask mandates, the states unmasked which had the lower initial death tolls started to have higher overall death numbers. If this upward trend continued, then it would have been easy to conclude that mask mandate removals are indeed a cause for concern based off rise in coronavirus related deaths. However, this difference between masked and unmasked state death tolls fell back close to even despite more states removing their mask mandates, indicating that there is likely some other cause for the rise like a general disregard for other social distancing guidelines, covid fatigue, or belief that vaccines would be enough and that there was no longer any need to keep practicing social distancing and following safety protocols other than mask mandates.
+
+  
+  
+  
+
+The code below uses a random forest to model the behavior of masked death totals based off the removal of mask mandates. Contrary to my personal expectation starting the project, there does not appear to be any relationship between removal of mask mandates and the total number of deaths a given state experiences. Even though this matches the results of the graphs above and the analysis, it is still interesting to see the conclusions backed up in the modeling even if they're apparent from the graphing results. 
+```{r}
+library(randomForest)
+
+
+set.seed(1)
+removed_na_model <- final.Frame %>%
+  filter(!(is.na(dateEnded)))
+
+
+model <- randomForest(
+  formula = death_rates ~ dateEnded,
+  data = removed_na_model
+)
+
+print(model)
+```
+
+The code below shows that the dateEnded actually no significant impact on the difference between the expected on the variance, meaning that it cannot be claimed based off this set of data that the removal of mask mandates in the United States had any on death numbers, which is consistent with the results from the models above and the graphs.  
+Using Fisher's hypothesis, there is no statistically significant relationship between the date that the mask mandates were lifted and the death rates for the given state.  
+
+Note: N = 24 because that is the number of states without mask mandates  
+         r(0) =0 because we’re testing against the null hypothesis of no relationship
+*r^2 = .1069; r = 0.327:  ln((1-.327)/(1-.327))(sqrt((24-3)/3)) = z = −1.7962818020*  
+In order for z to be significant, the value for z would have to be less than or equal to -1.96 for the traditional 95% confidence interval. Since the linear model derived from the data does not a significant relationship, we fail to reject the null hypothesis that there is no relationship between unmasking and death rates. Despite the large N value, the overall Z value is too low to reject the null hypothesis because the percentage of the variance which can be atttributed to the change in dateEnded is low at 10.69 percent.
+```{r}
+plot(model)
+```
+The chart above shows the error versus the number of trees using in the randomForest model. As you can see from the graph, the number error levels out to a constant, small value as the trees approach 500.  
+
+
+
+
+The point of this model using randomForests is to probe what portion of the variance of the residuals is a result of the date which the mask mandate was removed. If the modeling was done correctly, this result means that 10.69 percent of the variance of the residuals can be attributed to when the mask mandate was removed. This low r^2 value led to a Z value which indicated that this spread would occur 8 percent of random samples and a p value of .074 rather than the required p value of .05. In other words, there was no significant relationship between the date at which the mask mandates were removed and the death rates for the unmasked group. This is not what was expected coming into this analysis, and the different possible reasons why this is the case was explored in the discussion section before.
+
+
+
+
+## **Discussion**
+
+The data does not show any significant difference between masked and unmasked death rates. Especially after the median day that the mask mandates were added, the death rates for states remains close to the average regardless of whether or not a mask mandate is in place. This is not what I expected when initially starting the data analysis, but there are many likely contributing factors to this difference. One of the most likely scenarios is that many of the people in these states without mask mandates still wear their masks inside stores because most states still allow businesses to enforce their own mask mandates. The other likely sceanrio is that removal of mask mandates incentivizes people to go outside. As this article shows (https://www.irishtimes.com/news/ireland/irish-news/outdoor-transmission-accounts-for-0-1-of-state-s-covid-19-cases-1.4529036), a tiny fraction of coronavirus spread occurs outdoors. If people are encouraged to go outside, that is less time which they could be inside spreading the virus even if fewer people are wearing masks inside. In other words, there is not a rise in cases as one would expect because the rise in indoor spread from unmasked gatherings is negated by the increased time spent outside, which has recently been shown to put a serious dent in coronavirus spread and deaths. Human psychology may also play a major role in determining the effect of masks on a given population. While masks help indoors, people in state with mask mandates may feel safer meeting indoors with others knowing that everyone is wearing masks. From the data presented, it looks as if though the people indoors are wearing masks, they are likely at a similar level of risk as someone who is outdoors and not wearing a mask. Finally, recent studies have shown that vitamin D helps reduce the severity of coronavirus cases, lowering the probability of death(https://pubmed.ncbi.nlm.nih.gov/33142828/). Even though there may be more spread in these states, the overall death rate may be comparable because the vitamin D from exposure to sunlight helps those infected fight off the disease. 
+  We will likely have more data to go off once more mask mandates are lifted and the amount of data increases. However, from the datasets, there is no evidence that mask mandates in and of themselves have an appreciable impact on the number of cases. There are likely multiple different reasons behind this unexpected result. These include but are not limited to: more outdoor gatherings without masks mandates, less time spent in public areas because many people who have already been infected are not wearing masks, and the fact that vitamin D has been shown to reduce the severity of Covid-19-reducing deaths.
+
+
+
+
